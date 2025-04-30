@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { openSerialPort, closeSerialPort, sendSerialCommand, SerialResponse } from "@/services/serial-port";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { sendSerialCommand, SerialResponse } from "@/services/serial-port";
 import { cn } from "@/lib/utils";
+import { useSerialPortConnection } from "@/hooks/use-serial-port-connection";
 
 interface CommandQueueItem {
   id: number;
@@ -21,40 +22,16 @@ interface CommandQueueItem {
 }
 
 export default function Home() {
-  const [com3PortOpen, setCom3PortOpen] = useState(false);
-  const [com6PortOpen, setCom6PortOpen] = useState(false);
-  const [command, setCommand] = useState("");
-  const [commandQueue, setCommandQueue] = useState<CommandQueueItem[]>([]);
-  const [nextId, setNextId] = useState(1);
-  const [com3PortStatusMessage, setCom3PortStatusMessage] = useState("");
-  const [com6PortStatusMessage, setCom6PortStatusMessage] = useState("");
-
   const com3PortName = "COM3";
   const com6PortName = "COM6";
   const baudRate = 9600;
 
-  useEffect(() => {
-    // Update status message based on comPortOpen state
-    setCom3PortStatusMessage(com3PortOpen ? "COM3 Port Connected" : "COM3 Port Disconnected");
-    setCom6PortStatusMessage(com6PortOpen ? "COM6 Port Connected" : "COM6 Port Disconnected");
-  }, [com3PortOpen, com6PortOpen]);
+  const { isOpen: com3PortOpen, statusMessage: com3PortStatusMessage, togglePort: toggleCom3Port } = useSerialPortConnection(com3PortName, baudRate);
+  const { isOpen: com6PortOpen, statusMessage: com6PortStatusMessage, togglePort: toggleCom6Port } = useSerialPortConnection(com6PortName, baudRate);
 
-
-  const toggleComPort = async (portName: string, isOpen: boolean, setOpen: (open: boolean) => void, setStatusMessage: (message: string) => void) => {
-    try {
-      if (!isOpen) {
-        await openSerialPort(portName, baudRate);
-        setOpen(true);
-        setStatusMessage(`${portName} Port Connected`);
-      } else {
-        await closeSerialPort(portName);
-        setOpen(false);
-        setStatusMessage(`${portName} Port Disconnected`);
-      }
-    } catch (error: any) {
-      setStatusMessage(`Error toggling ${portName} port: ${error.message}`);
-    }
-  };
+  const [command, setCommand] = useState("");
+  const [commandQueue, setCommandQueue] = useState<CommandQueueItem[]>([]);
+  const [nextId, setNextId] = useState(1);
 
   const addCommandToQueue = () => {
     if (command.trim() !== "") {
@@ -78,7 +55,8 @@ export default function Home() {
   const sendCommandsToComPort = async () => {
     for (const item of commandQueue) {
       try {
-        const response: SerialResponse = await sendSerialCommand(com3PortName, item.command + "\\n");
+        const response: SerialResponse = await sendSerialCommand(com3PortName, `${item.command}
+`);
         setCommandQueue((prevQueue) =>
           prevQueue.map((queueItem) =>
             queueItem.id === item.id ? { ...queueItem, response: response.data } : queueItem
@@ -107,7 +85,7 @@ export default function Home() {
       {/* COM3 Port Toggle */}
       <div className="flex items-center justify-between bg-neutral-100 dark:bg-neutral-800 p-4 rounded shadow">
         <span className="font-semibold">COM3 Port Status: {com3PortStatusMessage}</span>
-        <Button variant="outline" onClick={() => toggleComPort(com3PortName, com3PortOpen, setCom3PortOpen, setCom3PortStatusMessage)} className={cn(com3PortOpen ? "bg-teal-500 hover:bg-teal-700 text-white" : "")}>
+        <Button variant="outline" onClick={toggleCom3Port} className={cn(com3PortOpen ? "bg-teal-500 hover:bg-teal-700 text-white" : "")}>
           {com3PortOpen ? "Disconnect COM3" : "Connect COM3"}
         </Button>
       </div>
@@ -115,7 +93,7 @@ export default function Home() {
       {/* COM6 Port Toggle */}
       <div className="flex items-center justify-between bg-neutral-100 dark:bg-neutral-800 p-4 rounded shadow">
         <span className="font-semibold">COM6 Port Status: {com6PortStatusMessage}</span>
-        <Button variant="outline" onClick={() => toggleComPort(com6PortName, com6PortOpen, setCom6PortOpen, setCom6PortStatusMessage)} className={cn(com6PortOpen ? "bg-teal-500 hover:bg-teal-700 text-white" : "")}>
+        <Button variant="outline" onClick={toggleCom6Port} className={cn(com6PortOpen ? "bg-teal-500 hover:bg-teal-700 text-white" : "")}>
           {com6PortOpen ? "Disconnect COM6" : "Connect COM6"}
         </Button>
       </div>
