@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { sendSerialCommand, SerialResponse } from "@/services/serial-port";
 import { cn } from "@/lib/utils";
 import { useSerialPortConnection } from "@/hooks/use-serial-port-connection";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 
 interface CommandQueueItem {
   id: number;
@@ -19,6 +21,7 @@ interface CommandQueueItem {
   Io: string;
   Po: string;
   Eff: string;
+  targetPort: string; // Add targetPort field
 }
 
 export default function Home() {
@@ -32,6 +35,7 @@ export default function Home() {
   const [command, setCommand] = useState("");
   const [commandQueue, setCommandQueue] = useState<CommandQueueItem[]>([]);
   const [nextId, setNextId] = useState(1);
+  const [selectedPort, setSelectedPort] = useState<string>(com3PortName); // State for selected port for new commands
 
   const addCommandToQueue = () => {
     if (command.trim() !== "") {
@@ -46,6 +50,7 @@ export default function Home() {
         Io: "",
         Po: "",
         Eff: "",
+        targetPort: selectedPort, // Include the selected port
       }]);
       setNextId(nextId + 1);
       setCommand(""); // Clear the input after adding to the queue
@@ -55,7 +60,8 @@ export default function Home() {
   const sendCommandsToComPort = async () => {
     for (const item of commandQueue) {
       try {
-        const response: SerialResponse = await sendSerialCommand(com3PortName, `${item.command}
+        // Use item.targetPort when sending the command
+        const response: SerialResponse = await sendSerialCommand(item.targetPort, `${item.command}
 `);
         setCommandQueue((prevQueue) =>
           prevQueue.map((queueItem) =>
@@ -80,6 +86,15 @@ export default function Home() {
     );
   };
 
+  // Function to update the target port for a specific queue item
+  const updateQueueItemPort = (id: number, port: string) => {
+    setCommandQueue((prevQueue) =>
+      prevQueue.map((queueItem) =>
+        queueItem.id === id ? { ...queueItem, targetPort: port } : queueItem
+      )
+    );
+  };
+
   return (
     <div className="container mx-auto p-4 flex flex-col gap-4">
       {/* COM3 Port Toggle */}
@@ -99,15 +114,27 @@ export default function Home() {
       </div>
 
 
-      {/* Command Input */}
-      <div className="flex gap-2 bg-neutral-100 dark:bg-neutral-800 p-4 rounded shadow">
-        <Input
-          type="text"
-          placeholder="Enter command"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          className="flex-grow font-mono"
-        />
+      {/* Command Input and Port Selection */}
+      <div className="flex gap-4 items-center bg-neutral-100 dark:bg-neutral-800 p-4 rounded shadow">
+        <div className="flex-grow flex gap-2 items-center">
+           <Input
+            type="text"
+            placeholder="Enter command"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            className="flex-grow font-mono"
+          />
+           <RadioGroup value={selectedPort} onValueChange={setSelectedPort} className="flex items-center gap-2">
+             <div className="flex items-center space-x-2">
+               <RadioGroupItem value={com3PortName} id="r1" />
+               <Label htmlFor="r1">{com3PortName}</Label>
+             </div>
+             <div className="flex items-center space-x-2">
+               <RadioGroupItem value={com6PortName} id="r2" />
+               <Label htmlFor="r2">{com6PortName}</Label>
+             </div>
+           </RadioGroup>
+        </div>
         <Button onClick={addCommandToQueue} className="bg-blue-500 hover:bg-blue-700 text-white font-bold">
           Add to Queue
         </Button>
@@ -120,6 +147,7 @@ export default function Home() {
             <TableRow>
               <TableHead className="w-[50px]">#</TableHead>
               <TableHead>Command</TableHead>
+              <TableHead>Target Port</TableHead>{/* New Table Head */}
               <TableHead>Response</TableHead>
               <TableHead>Vi</TableHead>
               <TableHead>Ii</TableHead>
@@ -135,6 +163,22 @@ export default function Home() {
               <TableRow key={item.id}>
                 <TableCell>{item.id}</TableCell>
                 <TableCell className="font-mono">{item.command}</TableCell>
+                <TableCell> {/* New Table Cell */}
+                  <RadioGroup
+                    value={item.targetPort}
+                    onValueChange={(port) => updateQueueItemPort(item.id, port)}
+                    className="flex items-center gap-2"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value={com3PortName} id={`item-${item.id}-r1`} />
+                      <Label htmlFor={`item-${item.id}-r1`}>{com3PortName}</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value={com6PortName} id={`item-${item.id}-r2`} />
+                      <Label htmlFor={`item-${item.id}-r2`}>{com6PortName}</Label>
+                    </div>
+                  </RadioGroup>
+                </TableCell>
                 <TableCell className="font-mono">{item.response}</TableCell>
                 <TableCell>
                   <Input
@@ -199,10 +243,9 @@ export default function Home() {
       </div>
 
       {/* Send to COM Button */}
-      <Button onClick={sendCommandsToComPort} disabled={!com3PortOpen} className="bg-teal-600 hover:bg-teal-800 text-white font-bold">
+      <Button onClick={sendCommandsToComPort} disabled={!com3PortOpen && !com6PortOpen} className="bg-teal-600 hover:bg-teal-800 text-white font-bold">
         Send to COM
       </Button>
     </div>
   );
 }
-
