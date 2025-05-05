@@ -58,25 +58,96 @@ export default function Home() {
   };
 
   const sendCommandsToComPort = async () => {
-    for (const item of commandQueue) {
-      try {
-        // Use item.targetPort when sending the command
-        const response: SerialResponse = await sendSerialCommand(item.targetPort, `${item.command}
+    const updatedCommandQueue = [...commandQueue];
+    for (let i = 0; i < updatedCommandQueue.length; i++) {
+      const item = updatedCommandQueue[i];
+      let responseData = "";
+
+      if ((item.targetPort === com3PortName && com3PortOpen) || (item.targetPort === com6PortName && com6PortOpen)) {
+        try {
+          // Use item.targetPort when sending the command
+          // Ensure newline character is correctly sent
+          const response: SerialResponse = await sendSerialCommand(item.targetPort, `${item.command}
 `);
-        setCommandQueue((prevQueue) =>
-          prevQueue.map((queueItem) =>
-            queueItem.id === item.id ? { ...queueItem, response: response.data } : queueItem
-          )
-        );
-      } catch (error: any) {
-        setCommandQueue((prevQueue) =>
-          prevQueue.map((queueItem) =>
-            queueItem.id === item.id ? { ...queueItem, response: `Error: ${error.message}` } : queueItem
-          )
-        );
+
+          responseData = response.data.trim(); // Trim whitespace from response
+        } catch (error: any) {
+          responseData = `Error: ${error.message}`;
+        }
+      } else {
+        responseData = `${item.targetPort} not connected`;
       }
+
+      // --- Start Command Specific Logic ---
+
+      let updatedItem = { ...item, response: responseData }; // Update response regardless of command
+
+      const isValidResponse = !responseData.startsWith('Error:') && !responseData.includes('not connected');
+      const isCom3 = item.targetPort === com3PortName;
+      const isCom6 = item.targetPort === com6PortName;
+      const commandUpper = item.command.toUpperCase(); // Use uppercase for case-insensitive matching
+
+      if (isValidResponse) {
+        if (commandUpper === 'MEAS:ALL?') {
+          const parts = responseData.split(',');
+          if (parts.length === 3) {
+            const num1 = parseFloat(parts[0]);
+            const num2 = parseFloat(parts[1]);
+            // Third number (parts[2]) is ignored
+
+            if (!isNaN(num1) && !isNaN(num2)) {
+              if (isCom3) {
+                const pi = num1 * num2;
+                updatedItem = {
+                  ...updatedItem,
+                  Vi: parts[0],
+                  Ii: parts[1],
+                  Pi: pi.toFixed(3), // Format to 3 decimal places
+                };
+              } else if (isCom6) {
+                const po = num1 * num2;
+                updatedItem = {
+                  ...updatedItem,
+                  Vo: parts[0],
+                  Io: parts[1],
+                  Po: po.toFixed(3), // Format to 3 decimal places
+                };
+              }
+            } else {
+              updatedItem.response = `Invalid numbers in MEAS:ALL? response: ${responseData}`;
+            }
+          } else {
+            updatedItem.response = `Expected 3 values for MEAS:ALL?, got ${parts.length}: ${responseData}`;
+          }
+        } else if (commandUpper === 'MEAS:VOLT?') {
+          if (isCom3) {
+            updatedItem = { ...updatedItem, Vi: responseData }; // Update Vi for COM3 Volt
+          } else if (isCom6) {
+            updatedItem = { ...updatedItem, Vo: responseData }; // Update Vo for COM6 Volt
+          }
+        } else if (commandUpper === 'MEAS:CURR?') {
+          if (isCom3) {
+            updatedItem = { ...updatedItem, Ii: responseData }; // Update Ii for COM3 Curr
+          } else if (isCom6) {
+            updatedItem = { ...updatedItem, Io: responseData }; // Update Io for COM6 Curr
+          }
+        }
+        // Add other command handling logic here if needed in the future
+      }
+
+      // --- End Command Specific Logic ---
+
+      updatedCommandQueue[i] = updatedItem; // Apply the updates
+      // Update state incrementally to show changes as they happen
+      setCommandQueue(currentQueue => 
+        currentQueue.map(qItem => qItem.id === updatedItem.id ? updatedItem : qItem)
+      );
+
+      // Add a small delay between commands if needed
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   };
+
 
   const updateQueueItem = (id: number, field: keyof CommandQueueItem, value: string) => {
     setCommandQueue((prevQueue) =>
@@ -159,85 +230,94 @@ export default function Home() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {commandQueue.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.id}</TableCell>
-                <TableCell className="font-mono">{item.command}</TableCell>
-                <TableCell> {/* New Table Cell */}
-                  <RadioGroup
-                    value={item.targetPort}
-                    onValueChange={(port) => updateQueueItemPort(item.id, port)}
-                    className="flex items-center gap-2"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value={com3PortName} id={`item-${item.id}-r1`} />
-                      <Label htmlFor={`item-${item.id}-r1`}>{com3PortName}</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value={com6PortName} id={`item-${item.id}-r2`} />
-                      <Label htmlFor={`item-${item.id}-r2`}>{com6PortName}</Label>
-                    </div>
-                  </RadioGroup>
-                </TableCell>
-                <TableCell className="font-mono">{item.response}</TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Vi}
-                    onChange={(e) => updateQueueItem(item.id, "Vi", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Ii}
-                    onChange={(e) => updateQueueItem(item.id, "Ii", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Pi}
-                    onChange={(e) => updateQueueItem(item.id, "Pi", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Vo}
-                    onChange={(e) => updateQueueItem(item.id, "Vo", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Io}
-                    onChange={(e) => updateQueueItem(item.id, "Io", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Po}
-                    onChange={(e) => updateQueueItem(item.id, "Po", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="text"
-                    value={item.Eff}
-                    onChange={(e) => updateQueueItem(item.id, "Eff", e.target.value)}
-                    className="w-20"
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
+            {commandQueue.map((item) => {
+              const commandUpper = item.command.toUpperCase(); // Use uppercase for case-insensitive matching in readOnly check
+              return (
+                <TableRow key={item.id}>
+                  <TableCell>{item.id}</TableCell>
+                  <TableCell className="font-mono">{item.command}</TableCell>
+                  <TableCell> {/* New Table Cell */}
+                    <RadioGroup
+                      value={item.targetPort}
+                      onValueChange={(port) => updateQueueItemPort(item.id, port)}
+                      className="flex items-center gap-2"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value={com3PortName} id={`item-${item.id}-r1`} />
+                        <Label htmlFor={`item-${item.id}-r1`}>{com3PortName}</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value={com6PortName} id={`item-${item.id}-r2`} />
+                        <Label htmlFor={`item-${item.id}-r2`}>{com6PortName}</Label>
+                      </div>
+                    </RadioGroup>
+                  </TableCell>
+                  <TableCell className="font-mono">{item.response}</TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Vi}
+                      onChange={(e) => updateQueueItem(item.id, "Vi", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?' || commandUpper === 'MEAS:VOLT?'} // ReadOnly if calculated for COM3
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Ii}
+                      onChange={(e) => updateQueueItem(item.id, "Ii", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?' || commandUpper === 'MEAS:CURR?'} // ReadOnly if calculated for COM3
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Pi}
+                      onChange={(e) => updateQueueItem(item.id, "Pi", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?'} // ReadOnly if calculated for COM3
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Vo}
+                      onChange={(e) => updateQueueItem(item.id, "Vo", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?' || commandUpper === 'MEAS:VOLT?'} // ReadOnly if calculated for COM6
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Io}
+                      onChange={(e) => updateQueueItem(item.id, "Io", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?' || commandUpper === 'MEAS:CURR?'} // ReadOnly if calculated for COM6
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Po}
+                      onChange={(e) => updateQueueItem(item.id, "Po", e.target.value)}
+                      className="w-20"
+                      readOnly={commandUpper === 'MEAS:ALL?'} // ReadOnly if calculated for COM6
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="text"
+                      value={item.Eff}
+                      onChange={(e) => updateQueueItem(item.id, "Eff", e.target.value)}
+                      className="w-20"
+                    />
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       </div>

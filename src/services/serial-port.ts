@@ -8,9 +8,7 @@ export interface SerialResponse {
   data: string;
 }
 
-let activePort: SerialPort | undefined;
-let reader: ReadableStreamDefaultReader | undefined;
-let writer: WritableStreamDefaultWriter | undefined;
+let activePort: SerialPort | undefined; // Keep activePort global
 
 /**
  * Asynchronously opens a serial port connection.
@@ -30,16 +28,10 @@ export async function openSerialPort(portName: string, baudRate: number): Promis
     // Open the port
     await activePort.open({ baudRate });
 
-    // Get readers and writers
-    reader = activePort.readable?.getReader();
-    writer = activePort.writable?.getWriter();
-
     console.log(`Serial port opened with baud rate ${baudRate}`);
   } catch (error: any) {
     console.error(`Error opening serial port: ${error.message}`);
     activePort = undefined;
-    reader = undefined;
-    writer = undefined;
     throw error;
   }
 }
@@ -50,15 +42,7 @@ export async function openSerialPort(portName: string, baudRate: number): Promis
  * @returns A promise that resolves when the port is successfully closed, or rejects if an error occurs.
  */
 export async function closeSerialPort(portName: string): Promise<void> {
-  if (reader) {
-    await reader.cancel();
-    reader.releaseLock();
-    reader = undefined;
-  }
-  if (writer) {
-    writer.releaseLock();
-    writer = undefined;
-  }
+
   if (activePort) {
     try {
       await activePort.close();
@@ -73,36 +57,76 @@ export async function closeSerialPort(portName: string): Promise<void> {
 
 /**
  * Asynchronously sends a command to the specified serial port and returns the response.
- * @param portName The name of the serial port to send the command to (e.g., 'COM3').
+ * Reads until a newline character is received or a timeout occurs.
+ * @param portName The name of the serial port to send the command to (e.g., 'COM3'). (Note: PortName is not used for sending in Web Serial API after connection)
  * @param command The command to send to the serial port.
+ * @param timeout Optional timeout in milliseconds for reading the response. Defaults to 2500ms.
  * @returns A promise that resolves with the SerialResponse from the COM port.
  */
-export async function sendSerialCommand(portName: string, command: string): Promise<SerialResponse> {
-  if (!writer) {
-    throw new Error("Serial port is not open.");
+export async function sendSerialCommand(portName: string, command: string, timeout: number = 2500): Promise<SerialResponse> {
+  // Check if activePort is available and appears valid
+  if (!activePort || !activePort.readable || !activePort.writable) {
+    throw new Error("Serial port is not properly initialized or has been closed.");
   }
-
+  
+  // Acquire reader and writer locally for this specific command
+  const reader = activePort.readable.getReader();
+  const writer = activePort.writable.getWriter();
+  
   const encoder = new TextEncoder();
-  await writer.write(encoder.encode(command));
-
-  // Assuming a response is expected, read from the port.
-  // This is a basic implementation and might need adjustments
-  // based on how your serial device sends responses.
-  let responseData = "";
   const decoder = new TextDecoder();
-  if (reader) {
+  let responseData = "";
+  const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Serial read timeout")), timeout));
+
+  try {
+    await writer.write(encoder.encode(command));
+
     while (true) {
-      const { value, done } = await reader.read();
+      const readPromise = reader.read();
+      const { value, done } = await Promise.race([readPromise, timeoutPromise]);
+
       if (done) {
         break;
       }
+
       responseData += decoder.decode(value);
-      // Add logic here to determine end of response if needed
-      // For example, break if a specific character is received.
+
+      // Check for newline character as end of response
+      if (responseData.includes('\\n')) {
+        // Trim any characters after the first newline if necessary
+        responseData = responseData.substring(0, responseData.indexOf('\\n') + 1);
+        break;
+      }
+    }
+  } catch (error: any) {
+    // If the error is due to timeout, log a warning and return the partial response
+    if (error.message === "Serial read timeout") {
+       console.warn(`Serial read timeout (${timeout}ms) occurred. Returning partial response: ${responseData}`);
+    } else {
+      // For any other error, re-throw it
+      throw error;
+    }
+  } finally {
+    // Release the locks in the finally block to ensure they are always released
+    try {
+      await reader.cancel(); // Cancel any pending reads
+      reader.releaseLock();
+      console.log("Reader lock released.");
+    } catch (error) {
+      console.warn("Error releasing reader lock:", error);
+    }
+  
+    try {
+      // Note: Releasing writer lock might not always be necessary immediately,
+      // but it's good practice for consistency, especially if write errors occur.
+      writer.releaseLock();
+      console.log("Writer lock released.");
+    } catch (error) {
+      console.warn("Error releasing writer lock:", error);
     }
   }
 
   return {
-    data: responseData,
+    data: responseData.trim(), // Trim whitespace, including the newline
   };
 }
